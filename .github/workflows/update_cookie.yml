@@ -1,0 +1,69 @@
+name: Update Hotstar Cookie
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # every hour on the hour
+  workflow_dispatch:        # manual trigger
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch latest cookie from source
+        id: cookie
+        run: |
+          SOURCE_URL="https://raw.githubusercontent.com/sportlive18/sportlink-update/refs/heads/main/tstar.m3u"
+
+          # Pull the cookie value from the first #EXTVLCOPT:http-cookie= line
+          COOKIE=$(curl -sf "$SOURCE_URL" \
+            | grep -m1 '^#EXTVLCOPT:http-cookie=' \
+            | sed 's/#EXTVLCOPT:http-cookie=//')
+
+          if [ -z "$COOKIE" ]; then
+            echo "ERROR: Could not extract cookie from source" >&2
+            exit 1
+          fi
+
+          echo "cookie=$COOKIE" >> "$GITHUB_OUTPUT"
+          echo "Extracted cookie: $COOKIE"
+
+      - name: Patch cookie into hotstar.m3u
+        run: |
+          COOKIE="${{ steps.cookie.outputs.cookie }}"
+          FILE="hotstar.m3u"
+
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: $FILE not found in repo root" >&2
+            exit 1
+          fi
+
+          # 1. Replace #EXTVLCOPT:http-cookie= lines
+          sed -i "s|#EXTVLCOPT:http-cookie=hdntl=.*|#EXTVLCOPT:http-cookie=$COOKIE|g" "$FILE"
+
+          # 2. Replace cookie value inside #EXTHTTP JSON lines
+          #    Pattern: "Cookie":"hdntl=..."}  →  "Cookie":"<new>"}
+          sed -i "s|\"Cookie\":\"hdntl=[^\"]*\"|\"Cookie\":\"$COOKIE\"|g" "$FILE"
+
+          # 3. Replace cookie in stream URLs (?|cookie=hdntl=... or &cookie=hdntl=...)
+          sed -i "s|cookie=hdntl=[^&\"| ]*|cookie=$COOKIE|g" "$FILE"
+
+          echo "Patched. Sample lines after update:"
+          grep -m3 "http-cookie\|\"Cookie\"" "$FILE"
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git diff --quiet hotstar.m3u && {
+            echo "No changes — cookie is already up to date."
+            exit 0
+          }
+
+          git add hotstar.m3u
+          git commit -m "chore: update hotstar cookie [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git push
