@@ -2,7 +2,7 @@ name: Update Hotstar Cookie
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour on the hour
+    - cron: '*/15 * * * *'  # every 15 minutes
   workflow_dispatch:        # manual trigger
 
 jobs:
